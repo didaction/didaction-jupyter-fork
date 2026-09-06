@@ -41,9 +41,9 @@ jobs:
         run: cargo install wasm-pack --version 0.13.1 --locked
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build for the organization project URL
+      - name: Build for the fork's organization project URL
         env:
-          VITE_BASE_PATH: /
+          VITE_BASE_PATH: /didaction-jupyter-fork/
         run: pnpm build:browser
       - name: Disable Jekyll processing
         run: touch dist-browser/.nojekyll

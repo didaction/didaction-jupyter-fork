@@ -31,6 +31,7 @@ research, or migration notes. They are not current setup instructions:
 
 - [Direct Jupyter protocol](investigations/direct-jupyter-protocol.md)
 - [JupyterLite browser runtime](investigations/jupyterlite-browser-runtime.md)
+- [`jupyterlite-web-mcp` design review](investigations/jupyterlite-web-mcp.md)
 - [xeus-python browser runtime](investigations/xeus-python-browser.md)
 - [Qrisp WASM compatibility](investigations/qrisp-wasm-compatibility.md)
 - [Rust gateway migration](investigations/rust-runtime-migration.md)
