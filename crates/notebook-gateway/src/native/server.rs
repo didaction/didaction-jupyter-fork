@@ -1017,12 +1017,18 @@ async fn run(
             let snapshot =
                 host.jupyter
                     .snapshot(path, &raw, base.unwrap_or(0), KernelState::Idle)?;
-            notebook_runtime::prepare(snapshot, command.clone()).map_err(|_| {
-                error(
+            if snapshot.cells.iter().any(|cell| {
+                !notebook_protocol::microscope::list(cell)
+                    .unwrap_or_default()
+                    .is_empty()
+            }) {
+                return Err(error(
                     ErrorCode::InvalidInput,
                     "Delete microscopes before renaming this notebook",
-                )
-            })?;
+                ));
+            }
+            notebook_runtime::prepare(snapshot, command.clone())
+                .map_err(|_| error(ErrorCode::InvalidInput, "Notebook rename is invalid"))?;
             output_path = host.config.path(new, false)?;
             host.jupyter.rename(path, &output_path).await?;
             let mut authority = host.authority.lock().await;

@@ -1,5 +1,111 @@
 import { expect, test } from "@playwright/test";
 
+test("browser transport renames notebooks that own microscope sidecars", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open demo workspace" }).click();
+  const outcome = await page.evaluate(async () => {
+    const { NotebookApplication, microscopeDocument } = await import(
+      String("/pkg/notebook_wasm.js")
+    );
+    const { BrowserNotebookTransport, initialBrowserSnapshot } = await import(
+      String("/src/browser-transport.ts")
+    );
+    const saved = initialBrowserSnapshot("owned.ipynb");
+    saved.cells = [
+      {
+        id: "code",
+        cell_type: "code",
+        source: "42",
+        metadata: {
+          didaction_microscopes: {
+            schema_version: 1,
+            items: [{ id: "abc1234", title: "Owned view" }],
+          },
+        },
+        execution_count: null,
+        outputs: [],
+      },
+    ];
+    const { IndexedNotebookStore } = await import(
+      String("/src/browser-store.ts")
+    );
+    const store = new IndexedNotebookStore(crypto.randomUUID());
+    await store.write("owned.ipynb", saved);
+    const identity = JSON.parse(
+      microscopeDocument(JSON.stringify(saved), "code", "abc1234", undefined),
+    );
+    identity.document.walkthrough = {
+      title: "Owned view",
+      steps: [
+        { id: "one", title: "One", code: "42", description: "Forty two" },
+      ],
+    };
+    await store.commitMicroscope(
+      saved,
+      identity.path,
+      JSON.stringify(identity.document),
+    );
+    const kernel = {
+      request: async () => ({}),
+      interrupt: () => {},
+      restart: async () => {},
+      close: () => {},
+    };
+    const transport = new BrowserNotebookTransport(
+      "owned.ipynb",
+      store,
+      kernel,
+      (snapshot: string) => new NotebookApplication(snapshot),
+    );
+    const command = (type: string, fields: Record<string, unknown> = {}) => ({
+      protocol_version: 1,
+      command_id: crypto.randomUUID(),
+      idempotency_key: crypto.randomUUID(),
+      timeout_ms: 30000,
+      type,
+      ...fields,
+    });
+    const setup = await transport.setup(
+      command("setup", {
+        path: "owned.ipynb",
+        kernel: "pyodide-314",
+        create: false,
+      }),
+    );
+    const result = await transport.rename(
+      command("rename_notebook", {
+        path: "renamed.ipynb",
+        expected_revision: 0,
+      }),
+    );
+    const artifacts = await store.artifacts();
+    const old = await store.read("owned.ipynb");
+    const renamed = await store.read("renamed.ipynb");
+    await store.close();
+    return {
+      setup,
+      result,
+      old,
+      renamed,
+      artifacts: artifacts.map((file: { path: string; bytes: Uint8Array }) => ({
+        path: file.path,
+        document: JSON.parse(new TextDecoder().decode(file.bytes)),
+      })),
+    };
+  });
+  expect(outcome.setup.error).toBeUndefined();
+  expect(outcome.setup.snapshot.cells).toHaveLength(1);
+  expect(outcome.result.error).toBeUndefined();
+  expect(outcome.result.snapshot.notebook.path).toBe("renamed.ipynb");
+  expect(outcome.old).toBeUndefined();
+  expect(outcome.renamed.notebook.path).toBe("renamed.ipynb");
+  expect(outcome.artifacts).toHaveLength(1);
+  expect(outcome.artifacts[0].path).toMatch(/^renamed\.ipynb\./);
+  expect(outcome.artifacts[0].document.notebook_path).toBe("renamed.ipynb");
+});
+
 test("browser transport validates in WASM and preserves state across storage failures and duplicate execution", async ({
   page,
 }) => {

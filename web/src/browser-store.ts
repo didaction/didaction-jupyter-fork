@@ -243,21 +243,95 @@ export class IndexedNotebookStore implements NotebookStore {
       const store = tx.objectStore("notebooks");
       const check = store.get(browserPath(path));
       const files = tx.objectStore("artifacts").getAll();
-      files.onsuccess = () => {
+      let destinationExists: boolean | undefined;
+      let artifacts:
+        | { path: string; directory: boolean; bytes: Uint8Array }[]
+        | undefined;
+      const commit = () => {
+        if (destinationExists === undefined || artifacts === undefined) return;
+        const ownedPrefixes = artifacts
+          .filter((file) => {
+            if (file.directory || !file.path.startsWith(`${oldPath}.`))
+              return false;
+            try {
+              const document = JSON.parse(new TextDecoder().decode(file.bytes));
+              const references = (
+                snapshot.cells as {
+                  id: string;
+                  metadata: Record<string, unknown>;
+                }[]
+              )
+                .flatMap((cell) => {
+                  const microscopes = cell.metadata.didaction_microscopes as
+                    | { items?: { id?: string }[] }
+                    | undefined;
+                  return (microscopes?.items ?? []).map((item) => ({
+                    cell: cell.id,
+                    id: item.id,
+                  }));
+                })
+                .filter((reference) => reference.id);
+              return (
+                document.notebook_path === oldPath &&
+                references.some(
+                  (reference) =>
+                    reference.cell === document.cell_id &&
+                    reference.id === document.microscope?.id,
+                )
+              );
+            } catch {
+              return false;
+            }
+          })
+          .map((file) => file.path);
+        const moving = new Map<string, string>();
+        for (const prefix of ownedPrefixes)
+          for (const file of artifacts)
+            if (file.path === prefix || file.path.startsWith(`${prefix}.`))
+              moving.set(
+                file.path,
+                `${path}${file.path.slice(oldPath.length)}`,
+              );
+        const retained = new Set(
+          artifacts
+            .filter((file) => !moving.has(file.path))
+            .map((file) => file.path),
+        );
         if (
-          check.result ||
-          files.result.some(
+          destinationExists ||
+          artifacts.some(
             (file: { path: string; directory: boolean }) =>
               file.path === path ||
               file.path.startsWith(path + "/") ||
               (!file.directory && path.startsWith(file.path + "/")),
-          )
+          ) ||
+          [...moving.values()].some((target) => retained.has(target))
         ) {
           tx.abort();
           return;
         }
+        const artifactStore = tx.objectStore("artifacts");
+        for (const [source, target] of moving) {
+          const original = artifacts.find((file) => file.path === source)!;
+          let bytes = original.bytes;
+          if (ownedPrefixes.includes(source)) {
+            const document = JSON.parse(new TextDecoder().decode(bytes));
+            document.notebook_path = path;
+            bytes = new TextEncoder().encode(JSON.stringify(document));
+          }
+          artifactStore.put({ ...original, path: target, bytes }, target);
+          artifactStore.delete(source);
+        }
         store.put(snapshot, path);
         store.delete(browserPath(oldPath));
+      };
+      check.onsuccess = () => {
+        destinationExists = check.result !== undefined;
+        commit();
+      };
+      files.onsuccess = () => {
+        artifacts = files.result;
+        commit();
       };
       tx.oncomplete = () => resolve();
       tx.onabort = tx.onerror = () =>

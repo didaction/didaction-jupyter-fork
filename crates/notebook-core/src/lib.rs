@@ -90,21 +90,7 @@ impl NotebookState {
                 notebook_protocol::microscope::prepare(&mut next.snapshot, &command.kind)?;
                 next.sync_state.clone()
             }
-            NotebookCommandKind::RenameNotebook { .. } => {
-                if self.snapshot.cells.iter().any(|c| {
-                    !notebook_protocol::microscope::list(c)
-                        .unwrap_or_default()
-                        .is_empty()
-                }) {
-                    return Err(notebook_protocol::ProtocolError {
-                        code: notebook_protocol::ErrorCode::InvalidInput,
-                        message: "Delete microscopes before renaming this notebook".into(),
-                        retryable: false,
-                    }
-                    .into());
-                }
-                next.sync_state.clone()
-            }
+            NotebookCommandKind::RenameNotebook { .. } => next.sync_state.clone(),
             NotebookCommandKind::ExecuteCell { .. } | NotebookCommandKind::ExecuteCode { .. } => {
                 SyncState::Executing
             }
