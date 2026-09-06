@@ -5,6 +5,11 @@ sidecar serves egui/WASM and the gateway from one origin. Transport is unchanged
 browser HTTP/NDJSON; gateway Jupyter REST/kernel WebSocket. Neither container
 receives the Docker socket. The gateway has no notebook filesystem mount.
 
+The Rust gateway image is built on pull requests and published from `main` and
+version tags as `ghcr.io/didaction/didaction-jupyter-fork-gateway`. Published
+images include the server-mode frontend and use immutable `sha-<commit>` tags;
+`latest` follows `main`.
+
 The gateway is now the native Rust host. The kernel runtime still uses the
 configured Jupyter Server image. For an explicit Python gateway rollback, use
 `docker compose -f docker-compose.yml -f deploy/compose.python.yml up --build -d`.
