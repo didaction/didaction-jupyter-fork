@@ -37,11 +37,33 @@ pub fn write(settings: &Settings, directory: &Path) -> io::Result<()> {
         .as_deref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "server profile lacks image"))?;
     let compose = format!(
-        "name: didaction\nservices:\n  kernel:\n    image: {image}\n    environment:\n      DIDACTION_NOTEBOOK_WORKSPACE: /workspace\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n    volumes:\n      - {workspace}:/workspace\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\n  gateway:\n    image: ghcr.io/didaction/didaction-jupyter-fork-gateway:latest\n    depends_on: [kernel]\n    environment:\n      DIDACTION_JUPYTER_URL: http://kernel:8888\n      DIDACTION_JUPYTER_KERNEL: {kernelspec}\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n      DIDACTION_NOTEBOOK_PATH: notebook.ipynb\n    ports: [\"127.0.0.1:{port}:8080\"]\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\nsecrets:\n  jupyter_token:\n    file: {directory}/secrets/jupyter-token\n",
+        "name: didaction\nservices:\n  jupyter:\n    image: {image}\n    environment:\n      DIDACTION_NOTEBOOK_WORKSPACE: /workspace\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n    volumes:\n      - {workspace}:/workspace\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\n  gateway:\n    image: ghcr.io/didaction/didaction-jupyter-fork-gateway:latest\n    depends_on: [jupyter]\n    environment:\n      DIDACTION_JUPYTER_URL: http://jupyter:8888\n      DIDACTION_JUPYTER_KERNEL: {kernelspec}\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n      DIDACTION_NOTEBOOK_PATH: notebook.ipynb\n    ports: [\"127.0.0.1:{port}:8080\"]\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\nsecrets:\n  jupyter_token:\n    file: {directory}/secrets/jupyter-token\n",
         workspace = workspace.display(),
         kernelspec = profile.kernelspec,
         port = settings.port,
         directory = directory.display(),
     );
     fs::write(directory.join("compose.yaml"), compose)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_stack_uses_the_jupyter_allowed_hostname() {
+        let directory = std::env::temp_dir().join(format!("djupctl-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(directory.join("secrets")).unwrap();
+        fs::write(directory.join("secrets/jupyter-token"), "test-token").unwrap();
+        let mut settings = Settings {
+            default_kernel: "verus".into(),
+            ..Settings::default()
+        };
+        settings.kernels.get_mut("verus").unwrap().enabled = true;
+        write(&settings, &directory).unwrap();
+        let compose = fs::read_to_string(directory.join("compose.yaml")).unwrap();
+        assert!(compose.contains("  jupyter:\n"));
+        assert!(compose.contains("DIDACTION_JUPYTER_URL: http://jupyter:8888"));
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
