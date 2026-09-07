@@ -8,6 +8,13 @@ pub fn write(settings: &Settings, directory: &Path) -> io::Result<()> {
         directory.join(&settings.workspace)
     };
     fs::create_dir_all(&workspace)?;
+    let startup_notebook = workspace.join("notebook.ipynb");
+    if !startup_notebook.exists() {
+        fs::write(
+            startup_notebook,
+            r#"{"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5}"#,
+        )?;
+    }
     let secrets = directory.join("secrets");
     fs::create_dir_all(&secrets)?;
     let token = secrets.join("jupyter-token");
@@ -37,7 +44,7 @@ pub fn write(settings: &Settings, directory: &Path) -> io::Result<()> {
         .as_deref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "server profile lacks image"))?;
     let compose = format!(
-        "name: didaction\nservices:\n  jupyter:\n    image: {image}\n    environment:\n      DIDACTION_NOTEBOOK_WORKSPACE: /workspace\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n    volumes:\n      - {workspace}:/workspace\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\n  gateway:\n    image: ghcr.io/didaction/didaction-jupyter-fork-gateway:latest\n    depends_on: [jupyter]\n    environment:\n      DIDACTION_JUPYTER_URL: http://jupyter:8888\n      DIDACTION_JUPYTER_KERNEL: {kernelspec}\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n      DIDACTION_NOTEBOOK_PATH: notebook.ipynb\n    ports: [\"127.0.0.1:{port}:8080\"]\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\nsecrets:\n  jupyter_token:\n    file: {directory}/secrets/jupyter-token\n",
+        "name: didaction\nservices:\n  jupyter:\n    image: {image}\n    environment:\n      DIDACTION_NOTEBOOK_WORKSPACE: /workspace\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n    volumes:\n      - {workspace}:/workspace\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\n  gateway:\n    image: ghcr.io/didaction/didaction-jupyter-fork-gateway:latest\n    depends_on: [jupyter]\n    environment:\n      DIDACTION_JUPYTER_URL: http://jupyter:8888\n      DIDACTION_KERNEL_NAME: {kernelspec}\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n      DIDACTION_NOTEBOOK_PATH: notebook.ipynb\n    ports: [\"127.0.0.1:{port}:8080\"]\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\nsecrets:\n  jupyter_token:\n    file: {directory}/secrets/jupyter-token\n",
         workspace = workspace.display(),
         kernelspec = profile.kernelspec,
         port = settings.port,
@@ -64,6 +71,8 @@ mod tests {
         let compose = fs::read_to_string(directory.join("compose.yaml")).unwrap();
         assert!(compose.contains("  jupyter:\n"));
         assert!(compose.contains("DIDACTION_JUPYTER_URL: http://jupyter:8888"));
+        assert!(compose.contains("DIDACTION_KERNEL_NAME: verus"));
+        assert!(directory.join("notebooks/notebook.ipynb").is_file());
         fs::remove_dir_all(directory).unwrap();
     }
 }
