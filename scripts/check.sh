@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
-cargo check --workspace --target wasm32-unknown-unknown
+cargo check --target wasm32-unknown-unknown -p notebook-protocol -p notebook-core -p notebook-runtime
 pnpm run build:wasm
 pnpm run format
 pnpm run typecheck

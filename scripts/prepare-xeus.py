@@ -80,9 +80,7 @@ with tempfile.TemporaryDirectory(prefix="xeus-pack-", dir=RUNTIME) as temp:
     # This directory contains only generated assets. Replace it so removed
     # packages cannot remain distributable after a lockfile upgrade.
     if output.exists():
-        if any(output.iterdir()) and not (
-            output / "didaction-xeus/xpython/kernel.json"
-        ).is_file():
+        if any(output.iterdir()) and not (output / "didaction-xeus/xpython/kernel.json").is_file():
             raise SystemExit(f"Refusing to replace unrecognized output directory: {output}")
         shutil.rmtree(output)
     shutil.copytree(build / "site/xeus", output)

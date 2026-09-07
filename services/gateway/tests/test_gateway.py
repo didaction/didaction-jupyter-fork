@@ -88,9 +88,7 @@ def test_startup_notebook_and_kernel_are_configuration(tmp_path: Path) -> None:
 
 
 def test_allowed_origins_are_explicit_and_exact() -> None:
-    settings = Settings(
-        allowed_origins="https://notebooks.example, http://localhost:5173/"
-    )
+    settings = Settings(allowed_origins="https://notebooks.example, http://localhost:5173/")
 
     assert settings.origin_allowed("https://notebooks.example", "gateway.example")
     assert settings.origin_allowed("http://localhost:5173", "gateway.example")
@@ -112,12 +110,8 @@ async def test_configured_origin_receives_bounded_cors_headers(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=gateway_main.app), base_url="http://gateway.example"
     ) as client:
-        allowed = await client.get(
-            "/healthz", headers={"origin": "https://notebooks.example"}
-        )
-        denied = await client.get(
-            "/healthz", headers={"origin": "https://untrusted.example"}
-        )
+        allowed = await client.get("/healthz", headers={"origin": "https://notebooks.example"})
+        denied = await client.get("/healthz", headers={"origin": "https://untrusted.example"})
         preflight = await client.options(
             "/api/v1/commands",
             headers={
