@@ -3046,8 +3046,11 @@ fn rendered_markdown_response(
         for block in markdown_blocks(source) {
             match block {
                 MarkdownBlock::Text(text) => {
-                    clicked_link = clicked_link
-                        .or_else(|| show_markdown_fragment(ui, text, cache, &render_math));
+                    if clicked_link.is_none() {
+                        clicked_link = show_markdown_fragment(ui, text, cache, &render_math);
+                    } else {
+                        show_markdown_fragment(ui, text, cache, &render_math);
+                    }
                 }
                 MarkdownBlock::Table(rows) => {
                     let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
@@ -3077,14 +3080,21 @@ fn rendered_markdown_response(
                                                 |ui| {
                                                     ui.set_min_width(column_width);
                                                     ui.set_max_width(column_width);
-                                                    clicked_link = clicked_link.or_else(|| {
+                                                    if clicked_link.is_none() {
+                                                        clicked_link = show_markdown_fragment(
+                                                            ui,
+                                                            &value,
+                                                            cache,
+                                                            &render_math,
+                                                        );
+                                                    } else {
                                                         show_markdown_fragment(
                                                             ui,
                                                             &value,
                                                             cache,
                                                             &render_math,
-                                                        )
-                                                    });
+                                                        );
+                                                    }
                                                 },
                                             );
                                         }
