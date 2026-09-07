@@ -93,7 +93,7 @@ test("browser workspace export bundles notebooks and microscopes; explorer stays
     await installMicroscopeTools(restored);
     await restored.goto(new URL("/", page.url()).href);
     await expect(
-      restored.getByRole("heading", { name: "Choose a workspace and kernel" }),
+      restored.getByRole("heading", { name: "Choose a workspace" }),
     ).toBeVisible();
     await restored.locator("#browser-zip").setInputFiles({
       name: "workspace.zip",

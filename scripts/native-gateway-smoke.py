@@ -31,13 +31,10 @@ with httpx.Client(base_url=os.environ["DIDACTION_GATEWAY_URL"], timeout=45) as c
     observer = client.post("/api/v1/collaboration/join", headers=b).json()
     b["x-notebook-client"] = observer["token"]
     assert not observer["is_driver"], observer
-    assert client.post("/api/v1/collaboration/claim", headers=b).status_code == 403
-    assert client.post("/api/v1/collaboration/release", headers=b).status_code == 403
-    assert client.post("/api/v1/collaboration/release", headers=a).status_code == 200
     assert client.post("/api/v1/collaboration/claim", headers=b).status_code == 200
-    assert client.post("/api/v1/collaboration/claim", headers=a).status_code == 403
-    assert client.post("/api/v1/collaboration/release", headers=b).status_code == 200
+    assert client.post("/api/v1/collaboration/release", headers=a).status_code == 403
     assert client.post("/api/v1/collaboration/claim", headers=a).status_code == 200
+    assert client.post("/api/v1/collaboration/release", headers=b).status_code == 403
 
     def call(kind: str, **kwargs: object) -> dict:
         value = client.post("/api/v1/commands", headers=a, json=command(kind, **kwargs)).json()
