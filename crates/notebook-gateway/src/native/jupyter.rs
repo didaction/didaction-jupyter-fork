@@ -773,6 +773,7 @@ mod tests {
             )]),
             notebook: "test.ipynb".into(),
             workspace: "/tmp".into(),
+            workspace_label: "/tmp".into(),
             static_dir: None,
             listen: "127.0.0.1:0".into(),
             request_limit: 300000,

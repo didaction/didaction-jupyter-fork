@@ -57,9 +57,6 @@ impl Collaboration {
         }
     }
     pub fn refresh(&mut self, now: u64) {
-        if self.rooms.values().any(|r| r.active > 0) {
-            return;
-        }
         self.members.retain(|m| {
             now.saturating_sub(m.touched) <= 45
                 && self.rooms.values().any(|r| r.members.contains(&m.token))
@@ -196,12 +193,6 @@ impl Collaboration {
     }
     pub fn claim_driver(&mut self, path: &str, token: &str, now: u64) -> Result<()> {
         let id = self.member(path, token, now)?;
-        if self.driver.is_some() {
-            return Err(fail(
-                ErrorCode::NotDriver,
-                "The current driver must release control first",
-            ));
-        }
         self.change_driver(&id)
     }
     pub fn state(&mut self, path: &str, token: &str, now: u64) -> Result<Value> {
@@ -336,19 +327,20 @@ mod tests {
         c.join("one", "a-token", Some("a".into()), 0).unwrap();
         c.join("two", "b-token", Some("b".into()), 0).unwrap();
         assert!(c.release_driver("two", "b-token", 1).is_err());
-        assert!(c.claim_driver("two", "b-token", 1).is_err());
+        c.claim_driver("two", "b-token", 1).unwrap();
+        assert_eq!(c.driver.as_deref(), Some("b"));
         c.room("one").unwrap().active = 1;
-        assert!(c.release_driver("one", "a-token", 1).is_err());
+        assert!(c.release_driver("two", "b-token", 1).is_err());
         c.room("one").unwrap().active = 0;
-        c.release_driver("one", "a-token", 2).unwrap();
+        c.release_driver("two", "b-token", 2).unwrap();
         c.refresh(3);
         c.join("three", "c-token", Some("c".into()), 3).unwrap();
         assert!(c.driver.is_none());
         assert!(c.require_driver("one", "a-token", 3).is_err());
         assert!(c.claim_driver("two", "b", 3).is_err());
         c.claim_driver("two", "b-token", 4).unwrap();
-        assert!(c.claim_driver("three", "c-token", 4).is_err());
-        c.require_driver("two", "b-token", 4).unwrap();
+        c.claim_driver("three", "c-token", 4).unwrap();
+        c.require_driver("three", "c-token", 4).unwrap();
         assert!(c.require_driver("one", "a-token", 4).is_err());
     }
     #[test]
@@ -369,7 +361,7 @@ mod tests {
         c.room("b").unwrap().active = 1;
         assert!(c.change_driver("alice").is_err());
         c.refresh(100);
-        assert_eq!(c.driver.as_deref(), Some("bob"));
+        assert!(c.driver.is_none());
         c.room("b").unwrap().active = 0;
         c.refresh(100);
         assert!(c.driver.is_none());

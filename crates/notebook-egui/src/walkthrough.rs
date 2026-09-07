@@ -116,13 +116,21 @@ impl NotebookEguiApp {
                 index += 1;
             }
             ui.separator();
-            rendered_markdown_response(
+            let rendered = rendered_markdown_response(
                 ui,
                 &format!("walkthrough-description-{}", step.id),
                 &step.description,
                 &mut self.markdown_cache,
                 &self.math_cache,
             );
+            if let Some(url) = rendered.clicked_link {
+                self.markdown_link = Some((
+                    url,
+                    ui.ctx()
+                        .pointer_latest_pos()
+                        .unwrap_or(rendered.response.rect.center()),
+                ));
+            }
             if focus.annotation_id.is_some() && ui.small_button("Clear focus").clicked() {
                 focus.annotation_id = None;
                 let _ = self.focus_walkthrough(focus.clone());

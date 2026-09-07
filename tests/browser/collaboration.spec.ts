@@ -165,8 +165,21 @@ test("one driver; observers receive intermediate output and handoff reverses per
   if (process.env.DIDACTION_GATEWAY_IMPLEMENTATION === "rust") {
     await expect(page.locator("#browser-home")).toBeHidden();
     await expect(
-      page.getByRole("button", { name: "Claim driver", exact: true }),
-    ).toBeHidden();
+      page.getByRole("button", { name: "Take control", exact: true }),
+    ).toBeVisible();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page
+      .getByRole("button", { name: "Take control", exact: true })
+      .click();
+    await expect.poll(async () => (await role(page)).is_driver).toBe(true);
+    await expect(
+      observer.getByRole("button", { name: "Take control", exact: true }),
+    ).toBeVisible();
+    observer.once("dialog", (dialog) => dialog.accept());
+    await observer
+      .getByRole("button", { name: "Take control", exact: true })
+      .click();
+    await expect.poll(async () => (await role(observer)).is_driver).toBe(true);
     await observer
       .getByRole("button", { name: "Release driver", exact: true })
       .click();
@@ -187,8 +200,8 @@ test("one driver; observers receive intermediate output and handoff reverses per
     await expect.poll(async () => (await role(page)).is_driver).toBe(true);
     await page.screenshot({ path: ".runtime/header-release-driver.png" });
     await expect(
-      observer.getByRole("button", { name: "Claim driver", exact: true }),
-    ).toBeHidden();
+      observer.getByRole("button", { name: "Take control", exact: true }),
+    ).toBeVisible();
     await page
       .getByRole("button", { name: "Release driver", exact: true })
       .click();

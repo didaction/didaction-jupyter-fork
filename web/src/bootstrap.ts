@@ -770,7 +770,19 @@ async function boot(): Promise<void> {
   } else {
     const response = await fetch("/api/v1/config");
     if (!response.ok) throw new Error("Gateway configuration unavailable");
-    startup = (await response.json()) as { path: string; kernel: string };
+    const configuration = (await response.json()) as {
+      path: string;
+      kernel: string;
+      workspace_label?: string;
+    };
+    startup = configuration;
+    const workspaceSource =
+      document.querySelector<HTMLOutputElement>("#workspace-source")!;
+    if (configuration.workspace_label) {
+      workspaceSource.hidden = false;
+      workspaceSource.textContent = `Workspace: ${configuration.workspace_label}`;
+      workspaceSource.title = `Notebook files are sourced from ${configuration.workspace_label}`;
+    }
   }
   const selected = new URL(location.href).searchParams.get("notebook");
   if (selected) startup.path = selected;
@@ -829,6 +841,14 @@ async function boot(): Promise<void> {
   permissionButton.onclick = async () => {
     const active = activeContext();
     if (!active || changingPermission) return;
+    if (
+      !active.canWrite?.() &&
+      active.collaboration?.().driver_id !== null &&
+      !confirm(
+        "Take workspace control from the current driver? Their notebook becomes read-only. Active execution must finish first.",
+      )
+    )
+      return;
     try {
       for (const context of openContexts) context.ready();
       changingPermission = true;
@@ -884,14 +904,17 @@ async function boot(): Promise<void> {
     const path = active?.path?.() ?? "";
     notebookName.textContent = path;
     notebookName.title = path;
-    permissionButton.hidden =
-      !!browserWorkspace ||
-      !active ||
-      (!isDriver && active.collaboration?.().driver_id !== null);
-    permissionButton.textContent = isDriver ? "Release driver" : "Claim driver";
+    permissionButton.hidden = !!browserWorkspace || !active;
+    permissionButton.textContent = isDriver
+      ? "Release driver"
+      : active?.collaboration?.().driver_id
+        ? "Take control"
+        : "Claim driver";
     permissionButton.title = isDriver
       ? "Let another collaborator claim workspace control"
-      : "Claim the vacant workspace driver role";
+      : active?.collaboration?.().driver_id
+        ? "Take workspace control; the current driver becomes read-only"
+        : "Claim the vacant workspace driver role";
     permissionButton.disabled = changingPermission;
     followButton.hidden = isDriver;
     driverStatus.hidden = !isDriver;

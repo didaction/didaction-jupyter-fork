@@ -33,6 +33,7 @@ pub struct Config {
     pub kernel_profiles: BTreeMap<String, KernelProfile>,
     pub notebook: String,
     pub workspace: PathBuf,
+    pub workspace_label: String,
     pub static_dir: Option<PathBuf>,
     pub listen: String,
     pub request_limit: usize,
@@ -101,6 +102,11 @@ impl Config {
             }
         };
         let default = kernel_profiles.get(&default_profile).ok_or_else(invalid)?;
+        let workspace = PathBuf::from(value("WORKSPACE", ".runtime/notebooks"));
+        let workspace_label = value("WORKSPACE_LABEL", &workspace.display().to_string());
+        if workspace_label.is_empty() || workspace_label.len() > 4096 {
+            return Err(invalid());
+        }
         let config = Self {
             url: default.url.clone(),
             token,
@@ -108,7 +114,8 @@ impl Config {
             default_profile,
             kernel_profiles,
             notebook: value("NOTEBOOK_PATH", "notebook-parity-demo.ipynb"),
-            workspace: value("WORKSPACE", ".runtime/notebooks").into(),
+            workspace,
+            workspace_label,
             static_dir: env::var("DIDACTION_STATIC_DIR").ok().map(Into::into),
             listen: value("GATEWAY_BIND", "127.0.0.1:8080"),
             request_limit,

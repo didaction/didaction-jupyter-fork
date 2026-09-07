@@ -121,6 +121,14 @@ body {
   font-weight: 600;
   white-space: nowrap;
 }
+
+#workspace-source {
+  max-width: min(42vw, 42rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #52616b;
+}
 #explorer-toggle {
   position: fixed;
   left: -100px;

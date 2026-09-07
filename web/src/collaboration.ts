@@ -177,7 +177,7 @@ export class NotebookCollaboration implements FollowTransport, FollowPublisher {
     });
     if (!response.ok)
       throw new Error(
-        "Control change refused. Wait until idle; the current driver must release control before someone can claim it.",
+        "Control change refused. Wait for active execution to finish, then try again.",
       );
   }
   async watch(

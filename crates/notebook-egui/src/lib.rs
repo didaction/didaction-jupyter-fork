@@ -278,6 +278,7 @@ pub struct NotebookEguiApp {
     restart_confirmation: bool,
     markdown_cache: CommonMarkCache,
     math_cache: Arc<Mutex<MathRenderCache>>,
+    markdown_link: Option<(String, egui::Pos2)>,
 }
 
 impl NotebookEguiApp {
@@ -426,6 +427,7 @@ impl NotebookEguiApp {
             restart_confirmation: false,
             markdown_cache: CommonMarkCache::default(),
             math_cache: Arc::new(Mutex::new(MathRenderCache::default())),
+            markdown_link: None,
         }
     }
     pub fn cell_view(&mut self, id: &str, action: &str, value: &str) -> Result<(), String> {
@@ -1938,18 +1940,27 @@ impl NotebookEguiApp {
                     let rendered = self.read_only || self.rendered_markdown.contains(&cell.id);
                     if rendered {
                         let source = self.editor_source(&cell);
-                        let rendered_response = rendered_markdown_response(
+                        let rendered = rendered_markdown_response(
                             ui,
                             &cell.id,
                             &source,
                             &mut self.markdown_cache,
                             &self.math_cache,
-                        )
-                        .on_hover_text(if self.read_only {
-                            "Read-only while another collaborator drives"
-                        } else {
-                            "Double-click to edit Markdown"
-                        });
+                        );
+                        if let Some(url) = rendered.clicked_link {
+                            self.markdown_link = Some((
+                                url,
+                                ui.ctx()
+                                    .pointer_latest_pos()
+                                    .unwrap_or(rendered.response.rect.center()),
+                            ));
+                        }
+                        let rendered_response =
+                            rendered.response.on_hover_text(if self.read_only {
+                                "Read-only while another collaborator drives"
+                            } else {
+                                "Double-click to edit Markdown"
+                            });
                         self.apply_rendered_markdown_interaction(
                             &cell.id,
                             rendered_response.clicked(),
@@ -2347,6 +2358,24 @@ impl eframe::App for NotebookEguiApp {
         });
         install_data_image_loader(ctx);
         egui_extras::install_image_loaders(ctx);
+        if let Some((url, position)) = self.markdown_link.clone() {
+            egui::Area::new(egui::Id::new("markdown-link-menu"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(position)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_max_width(360.0);
+                        ui.label(RichText::new(&url).small()).on_hover_text(&url);
+                        if ui.button("Open link in new tab").clicked() {
+                            ctx.open_url(egui::OpenUrl::new_tab(url.clone()));
+                            self.markdown_link = None;
+                        }
+                        if ui.small_button("Cancel").clicked() {
+                            self.markdown_link = None;
+                        }
+                    });
+                });
+        }
         if let Some((cell_id, item)) = self.microscope_delete.clone() {
             egui::Window::new("Delete microscope?")
                 .collapsible(false)
@@ -2888,13 +2917,122 @@ fn ansi_foreground(parameters: &str, current: Color32, base: Color32) -> Color32
     color
 }
 
+struct RenderedMarkdown {
+    response: egui::Response,
+    clicked_link: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum MarkdownBlock<'a> {
+    Text(&'a str),
+    Table(Vec<Vec<String>>),
+}
+
+fn table_cells(line: &str) -> Vec<String> {
+    let line = line.trim().trim_matches('|');
+    let mut cells = Vec::new();
+    let mut cell = String::new();
+    let mut escaped = false;
+    for character in line.chars() {
+        if character == '|' && !escaped {
+            cells.push(cell.trim().to_owned());
+            cell.clear();
+        } else {
+            cell.push(character);
+        }
+        escaped = character == '\\' && !escaped;
+        if character != '\\' {
+            escaped = false;
+        }
+    }
+    cells.push(cell.trim().to_owned());
+    cells
+}
+
+fn table_separator(line: &str) -> bool {
+    let cells = table_cells(line);
+    !cells.is_empty()
+        && cells.iter().all(|cell| {
+            let trimmed = cell.trim().trim_matches(':');
+            trimmed.len() >= 3 && trimmed.chars().all(|character| character == '-')
+        })
+}
+
+fn markdown_blocks(source: &str) -> Vec<MarkdownBlock<'_>> {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut blocks = Vec::new();
+    let mut line = 0;
+    let mut text_start = 0;
+    let mut byte_offset = 0;
+    let offsets = lines
+        .iter()
+        .map(|item| {
+            let offset = byte_offset;
+            byte_offset += item.len();
+            offset
+        })
+        .collect::<Vec<_>>();
+    while line + 1 < lines.len() {
+        if lines[line].contains('|') && table_separator(lines[line + 1]) {
+            if text_start < offsets[line] {
+                blocks.push(MarkdownBlock::Text(&source[text_start..offsets[line]]));
+            }
+            let mut rows = vec![table_cells(lines[line])];
+            line += 2;
+            while line < lines.len() && !lines[line].trim().is_empty() && lines[line].contains('|')
+            {
+                rows.push(table_cells(lines[line]));
+                line += 1;
+            }
+            blocks.push(MarkdownBlock::Table(rows));
+            text_start = offsets.get(line).copied().unwrap_or(source.len());
+            continue;
+        }
+        line += 1;
+    }
+    if text_start < source.len() {
+        blocks.push(MarkdownBlock::Text(&source[text_start..]));
+    }
+    if blocks.is_empty() {
+        blocks.push(MarkdownBlock::Text(source));
+    }
+    blocks
+}
+
+fn show_markdown_fragment(
+    ui: &mut egui::Ui,
+    source: &str,
+    cache: &mut CommonMarkCache,
+    render_math: &egui_commonmark::RenderMathFn,
+) -> Option<String> {
+    let links = pulldown_cmark::Parser::new_ext(source, pulldown_cmark::Options::all())
+        .filter_map(|event| match event {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) => {
+                Some(dest_url.to_string())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for link in &links {
+        cache.add_link_hook(link);
+    }
+    CommonMarkViewer::new()
+        .explicit_image_uri_scheme(true)
+        .max_image_width(Some(ui.available_width().max(1.0) as usize))
+        .render_math_fn(Some(render_math))
+        .show(ui, cache, source);
+    links
+        .into_iter()
+        .find(|link| cache.get_link_hook(link) == Some(true))
+}
+
 fn rendered_markdown_response(
     ui: &mut egui::Ui,
     cell_id: &str,
     source: &str,
     cache: &mut CommonMarkCache,
     math_cache: &Arc<Mutex<MathRenderCache>>,
-) -> egui::Response {
+) -> RenderedMarkdown {
     let math_cache = Arc::clone(math_cache);
     let render_math = move |ui: &mut egui::Ui, math: &str, inline: bool| {
         math_cache
@@ -2902,18 +3040,71 @@ fn rendered_markdown_response(
             .expect("markdown math cache mutex poisoned")
             .show(ui, math, inline);
     };
+    let mut clicked_link = None;
     let rendered = ui.scope(|ui| {
-        CommonMarkViewer::new()
-            .explicit_image_uri_scheme(true)
-            .max_image_width(Some(ui.available_width().max(1.0) as usize))
-            .render_math_fn(Some(&render_math))
-            .show(ui, cache, source);
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        for block in markdown_blocks(source) {
+            match block {
+                MarkdownBlock::Text(text) => {
+                    clicked_link = clicked_link
+                        .or_else(|| show_markdown_fragment(ui, text, cache, &render_math));
+                }
+                MarkdownBlock::Table(rows) => {
+                    let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+                    let spacing = ui.spacing().item_spacing.x * (columns.saturating_sub(1) as f32);
+                    let column_width =
+                        ((ui.available_width() - spacing) / columns as f32).max(80.0);
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        for (row_index, row) in rows.into_iter().enumerate() {
+                            egui::Frame::new()
+                                .fill(if row_index % 2 == 0 {
+                                    Color32::from_rgb(248, 249, 250)
+                                } else {
+                                    Color32::WHITE
+                                })
+                                .inner_margin(Margin::symmetric(6, 4))
+                                .show(ui, |ui| {
+                                    ui.horizontal_top(|ui| {
+                                        for column in 0..columns {
+                                            let mut value =
+                                                row.get(column).cloned().unwrap_or_default();
+                                            if row_index == 0 {
+                                                value = format!("**{value}**");
+                                            }
+                                            ui.allocate_ui_with_layout(
+                                                egui::vec2(column_width, 0.0),
+                                                egui::Layout::top_down(egui::Align::Min),
+                                                |ui| {
+                                                    ui.set_min_width(column_width);
+                                                    ui.set_max_width(column_width);
+                                                    clicked_link = clicked_link.or_else(|| {
+                                                        show_markdown_fragment(
+                                                            ui,
+                                                            &value,
+                                                            cache,
+                                                            &render_math,
+                                                        )
+                                                    });
+                                                },
+                                            );
+                                        }
+                                    });
+                                });
+                        }
+                    });
+                }
+            }
+        }
     });
-    ui.interact(
+    let response = ui.interact(
         rendered.response.rect,
         ui.make_persistent_id(("rendered-markdown", cell_id)),
         egui::Sense::click(),
-    )
+    );
+    RenderedMarkdown {
+        response,
+        clicked_link,
+    }
 }
 
 #[derive(Default)]
@@ -4354,12 +4545,38 @@ mod tests {
                 let math_cache = Arc::new(Mutex::new(MathRenderCache::default()));
                 senses_click =
                     rendered_markdown_response(ui, "markdown", "# Hello", &mut cache, &math_cache)
+                        .response
                         .sense
                         .senses_click();
             });
         });
 
         assert!(senses_click);
+    }
+
+    #[test]
+    fn markdown_tables_are_split_into_bounded_cells() {
+        let source = "Before\n\n| Study | Useful representation |\n| --- | --- |\n| Power flow | A long explanation that must wrap |\n\nAfter";
+        let blocks = markdown_blocks(source);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0], MarkdownBlock::Text("Before\n\n"));
+        assert_eq!(
+            blocks[1],
+            MarkdownBlock::Table(vec![
+                vec!["Study".into(), "Useful representation".into()],
+                vec![
+                    "Power flow".into(),
+                    "A long explanation that must wrap".into()
+                ],
+            ])
+        );
+        assert_eq!(blocks[2], MarkdownBlock::Text("\nAfter"));
+    }
+
+    #[test]
+    fn markdown_table_separator_requires_real_dashes() {
+        assert!(table_separator("| :--- | ---: |"));
+        assert!(!table_separator("| Study | Description |"));
     }
 
     #[test]

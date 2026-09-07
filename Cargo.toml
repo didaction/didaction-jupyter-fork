@@ -28,6 +28,7 @@ egui_code_editor = "=0.2.17"
 egui_commonmark = { version = "=0.21.0", default-features = false }
 egui_extras = { version = "0.32.3", features = ["syntect", "image", "svg"] }
 mitex = "=0.2.4"
+pulldown-cmark = "=0.13.4"
 js-sys = "0.3.82"
 notebook-core = { path = "crates/notebook-core" }
 notebook-egui = { path = "crates/notebook-egui" }

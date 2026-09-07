@@ -13,6 +13,7 @@ egui_extras.workspace = true
 mitex.workspace = true
 notebook-core.workspace = true
 notebook-protocol.workspace = true
+pulldown-cmark.workspace = true
 serde_json.workspace = true
 typst.workspace = true
 typst-as-lib.workspace = true

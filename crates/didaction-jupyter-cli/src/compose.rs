@@ -87,11 +87,12 @@ pub fn write(settings: &Settings, directory: &Path) -> io::Result<()> {
         .map_err(io::Error::other)?,
     )?;
     let compose = format!(
-        "name: didaction\nservices:\n{services}  gateway:\n    image: ghcr.io/didaction/didaction-jupyter-fork-gateway:latest\n    depends_on: [{dependencies}]\n    environment:\n      DIDACTION_KERNEL_PROFILES_FILE: /run/didaction/kernel-profiles.json\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n      DIDACTION_NOTEBOOK_PATH: notebook.ipynb\n    volumes:\n      - {profiles}:/run/didaction/kernel-profiles.json:ro\n    ports: [\"127.0.0.1:{port}:8080\"]\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\nsecrets:\n  jupyter_token:\n    file: {directory}/secrets/jupyter-token\n",
+        "name: didaction\nservices:\n{services}  gateway:\n    image: ghcr.io/didaction/didaction-jupyter-fork-gateway:latest\n    depends_on: [{dependencies}]\n    environment:\n      DIDACTION_KERNEL_PROFILES_FILE: /run/didaction/kernel-profiles.json\n      DIDACTION_JUPYTER_TOKEN_FILE: /run/secrets/jupyter_token\n      DIDACTION_NOTEBOOK_PATH: notebook.ipynb\n      DIDACTION_WORKSPACE_LABEL: {workspace_label:?}\n    volumes:\n      - {profiles}:/run/didaction/kernel-profiles.json:ro\n    ports: [\"127.0.0.1:{port}:8080\"]\n    secrets: [jupyter_token]\n    security_opt: [no-new-privileges:true]\n    cap_drop: [ALL]\nsecrets:\n  jupyter_token:\n    file: {directory}/secrets/jupyter-token\n",
         dependencies = dependencies.join(", "),
         profiles = directory.join("kernel-profiles.json").display(),
         port = settings.port,
         directory = directory.display(),
+        workspace_label = workspace.display().to_string(),
     );
     fs::write(directory.join("compose.yaml"), compose)
 }

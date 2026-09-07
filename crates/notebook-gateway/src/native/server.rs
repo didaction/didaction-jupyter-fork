@@ -259,7 +259,7 @@ async fn ready(State(host): State<App>) -> Response {
     }
 }
 async fn configuration(State(host): State<App>) -> Response {
-    Json(json!({"path":host.config.path(&host.config.notebook,false).unwrap_or_default(),"kernel":host.config.kernel,"default_kernel_profile":host.config.default_profile,"kernel_profiles":host.config.kernel_profiles.iter().map(|(id,p)| json!({"id":id,"kernelspec":p.kernelspec})).collect::<Vec<_>>()})).into_response()
+    Json(json!({"path":host.config.path(&host.config.notebook,false).unwrap_or_default(),"kernel":host.config.kernel,"workspace_label":host.config.workspace_label,"default_kernel_profile":host.config.default_profile,"kernel_profiles":host.config.kernel_profiles.iter().map(|(id,p)| json!({"id":id,"kernelspec":p.kernelspec})).collect::<Vec<_>>()})).into_response()
 }
 async fn list(State(host): State<App>, Query(query): Query<HashMap<String, String>>) -> Response {
     match host
