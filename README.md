@@ -93,8 +93,9 @@ djupctl up
 
 `djupctl` stores configuration, a generated Compose file, and its private
 development token under `~/.config/didaction`. The TUI distinguishes server
-container profiles from browser-WASM profiles; only an enabled server profile can
-be selected for a Compose deployment.
+container profiles from browser-WASM profiles. Compose starts every enabled
+server profile in its own container; notebook `metadata.kernelspec.name` selects
+the profile, and the configured default is used for new notebooks.
 
 Only <http://127.0.0.1:5173> is published; Jupyter remains on the private container
 network. See [Container deployment](docs/container-deployment.md) for custom images,

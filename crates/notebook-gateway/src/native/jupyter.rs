@@ -5,7 +5,11 @@ use notebook_protocol::*;
 use notebook_runtime::{KernelEvent, OutputState};
 use reqwest::{Client, Method};
 use serde_json::{Value, json};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async_with_config,
@@ -17,6 +21,8 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub struct Jupyter {
     pub config: Arc<Config>,
     http: Client,
+    bindings: RwLock<HashMap<String, String>>,
+    kernel_profiles: RwLock<HashMap<String, String>>,
 }
 impl Jupyter {
     pub fn new(config: Arc<Config>) -> Result<Self> {
@@ -25,7 +31,93 @@ impl Jupyter {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| disconnected())?;
-        Ok(Self { config, http })
+        Ok(Self {
+            config,
+            http,
+            bindings: RwLock::new(HashMap::new()),
+            kernel_profiles: RwLock::new(HashMap::new()),
+        })
+    }
+    fn profile(&self, id: &str) -> Result<&super::config::KernelProfile> {
+        self.config.kernel_profiles.get(id).ok_or_else(|| {
+            error(
+                ErrorCode::UnsupportedOperation,
+                "Notebook kernelspec has no enabled server profile",
+            )
+        })
+    }
+    fn profile_for_path(&self, path: &str) -> String {
+        self.bindings
+            .read()
+            .unwrap()
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| self.config.default_profile.clone())
+    }
+    fn resolve_profile(&self, selector: &str) -> Result<String> {
+        if self.config.kernel_profiles.contains_key(selector) {
+            return Ok(selector.into());
+        }
+        let matches = self
+            .config
+            .kernel_profiles
+            .iter()
+            .filter(|(_, profile)| profile.kernelspec == selector)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [id] => Ok(id.clone()),
+            _ => Err(error(
+                ErrorCode::UnsupportedOperation,
+                "Kernel selector must identify one enabled server profile",
+            )),
+        }
+    }
+    pub fn inherit_profile(&self, target: &str, source: &str) {
+        self.bindings
+            .write()
+            .unwrap()
+            .insert(target.into(), self.profile_for_path(source));
+    }
+    pub async fn request_for_path(
+        &self,
+        path: &str,
+        method: Method,
+        route: &str,
+        body: Option<Value>,
+    ) -> Result<(u16, Value)> {
+        self.request_on(&self.profile_for_path(path), method, route, body)
+            .await
+    }
+    pub async fn request_for_kernel(
+        &self,
+        id: &str,
+        method: Method,
+        route: &str,
+        body: Option<Value>,
+    ) -> Result<(u16, Value)> {
+        let profile = self
+            .kernel_profiles
+            .read()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| self.config.default_profile.clone());
+        self.request_on(&profile, method, route, body).await
+    }
+    pub async fn request_on(
+        &self,
+        profile: &str,
+        method: Method,
+        route: &str,
+        body: Option<Value>,
+    ) -> Result<(u16, Value)> {
+        let url = self
+            .profile(profile)?
+            .url
+            .join(route)
+            .map_err(|_| malformed())?;
+        self.request_url(url, method, body).await
     }
     pub async fn request(
         &self,
@@ -34,6 +126,14 @@ impl Jupyter {
         body: Option<Value>,
     ) -> Result<(u16, Value)> {
         let url = self.config.url.join(route).map_err(|_| malformed())?;
+        self.request_url(url, method, body).await
+    }
+    async fn request_url(
+        &self,
+        url: url::Url,
+        method: Method,
+        body: Option<Value>,
+    ) -> Result<(u16, Value)> {
         let mut request = self
             .http
             .request(method, url)
@@ -69,29 +169,35 @@ impl Jupyter {
         ))
     }
     pub async fn discover(&self) -> Result<Value> {
-        if self.request(Method::GET, "api/status", None).await?.0 != 200 {
-            return Err(disconnected());
-        }
-        let (status, specs) = self.request(Method::GET, "api/kernelspecs", None).await?;
-        if status != 200 {
-            return Err(disconnected());
-        }
-        if specs["kernelspecs"].get(&self.config.kernel).is_none() {
-            return Err(error(
-                ErrorCode::UnsupportedOperation,
-                "Configured kernelspec is not installed",
-            ));
-        }
-        if self
-            .request(Method::GET, "api/contents?content=0", None)
-            .await?
-            .0
-            != 200
-        {
-            return Err(disconnected());
+        for (id, profile) in &self.config.kernel_profiles {
+            if self
+                .request_on(id, Method::GET, "api/status", None)
+                .await?
+                .0
+                != 200
+            {
+                return Err(disconnected());
+            }
+            let (status, specs) = self
+                .request_on(id, Method::GET, "api/kernelspecs", None)
+                .await?;
+            if status != 200 || specs["kernelspecs"].get(&profile.kernelspec).is_none() {
+                return Err(error(
+                    ErrorCode::UnsupportedOperation,
+                    "Configured kernelspec is not installed",
+                ));
+            }
+            if self
+                .request_on(id, Method::GET, "api/contents?content=0", None)
+                .await?
+                .0
+                != 200
+            {
+                return Err(disconnected());
+            }
         }
         Ok(
-            json!({"adapter":"jupyter","services":["contents","sessions","kernels","kernel_channels"]}),
+            json!({"adapter":"jupyter","profiles":self.config.kernel_profiles.keys().collect::<Vec<_>>(),"services":["contents","sessions","kernels","kernel_channels"]}),
         )
     }
     pub async fn list(&self, directory: &str) -> Result<Value> {
@@ -147,22 +253,65 @@ impl Jupyter {
         });
         Ok(json!({"directory":path,"entries":entries}))
     }
-    pub async fn setup(&self, path: &str, create: bool) -> Result<Value> {
+    pub async fn setup(&self, path: &str, create: bool, requested: Option<&str>) -> Result<Value> {
+        let requested = self.resolve_profile(requested.unwrap_or(&self.config.default_profile))?;
+        self.profile(&requested)?;
         let (status, _) = self
             .request(Method::GET, &format!("api/contents/{path}?content=0"), None)
             .await?;
         if status == 404 && create {
-            let notebook = json!({"nbformat":4,"nbformat_minor":5,"metadata":{},"cells":[{"id":Uuid::new_v4().to_string(),"cell_type":"code","source":"","metadata":{},"outputs":[],"execution_count":null}]});
+            let profile = self.profile(&requested)?;
+            let notebook = json!({"nbformat":4,"nbformat_minor":5,"metadata":{"kernelspec":{"name":profile.kernelspec,"display_name":profile.kernelspec}},"cells":[{"id":Uuid::new_v4().to_string(),"cell_type":"code","source":"","metadata":{},"outputs":[],"execution_count":null}]});
+            self.bindings
+                .write()
+                .unwrap()
+                .insert(path.into(), requested.clone());
             self.save(path, &notebook).await?;
         } else if status != 200 {
             return Err(error(ErrorCode::InvalidInput, "Notebook does not exist"));
+        } else {
+            let (_, raw) = self
+                .request(
+                    Method::GET,
+                    &format!("api/contents/{path}?content=1&type=notebook"),
+                    None,
+                )
+                .await?;
+            let name = raw["content"]["metadata"]["kernelspec"]["name"].as_str();
+            let selected = if let Some(name) = name {
+                self.config
+                    .kernel_profiles
+                    .iter()
+                    .find(|(_, profile)| profile.kernelspec == name)
+                    .map(|(id, _)| id.as_str())
+                    .ok_or_else(|| {
+                        error(
+                            ErrorCode::UnsupportedOperation,
+                            "Notebook kernelspec has no enabled server profile",
+                        )
+                    })?
+            } else {
+                requested.as_str()
+            };
+            if requested != self.config.default_profile && selected != requested {
+                return Err(error(
+                    ErrorCode::UnsupportedOperation,
+                    "Requested profile differs from notebook kernelspec metadata",
+                ));
+            }
+            self.bindings
+                .write()
+                .unwrap()
+                .insert(path.into(), selected.into());
         }
         self.ensure_kernel(path).await?;
         self.read(path).await
     }
     pub async fn read(&self, path: &str) -> Result<Value> {
+        let profile = self.profile_for_path(path);
         let (status, raw) = self
-            .request(
+            .request_on(
+                &profile,
                 Method::GET,
                 &format!("api/contents/{path}?content=1&type=notebook"),
                 None,
@@ -199,7 +348,8 @@ impl Jupyter {
             return Err(error(ErrorCode::BoundsExceeded, "Notebook exceeds limit"));
         }
         let (status, _) = self
-            .request(
+            .request_on(
+                &self.profile_for_path(path),
                 Method::PUT,
                 &format!("api/contents/{path}"),
                 Some(json!({"type":"notebook","format":"json","content":notebook})),
@@ -262,6 +412,10 @@ impl Jupyter {
                 outputs: outputs.outputs().to_vec(),
             });
         }
+        let kernel = self
+            .profile(&self.profile_for_path(path))?
+            .kernelspec
+            .clone();
         let snapshot = NotebookSnapshot {
             protocol_version: 1,
             schema_version: 1,
@@ -270,8 +424,8 @@ impl Jupyter {
                 workspace: "local".into(),
             },
             kernel: KernelIdentity {
-                name: self.config.kernel.clone(),
-                display_name: self.config.kernel.clone(),
+                name: kernel.clone(),
+                display_name: kernel,
                 session_id: None,
                 state,
             },
@@ -283,7 +437,11 @@ impl Jupyter {
         Ok(snapshot)
     }
     pub async fn ensure_kernel(&self, path: &str) -> Result<Value> {
-        let (status, sessions) = self.request(Method::GET, "api/sessions", None).await?;
+        let profile_id = self.profile_for_path(path);
+        let kernelspec = self.profile(&profile_id)?.kernelspec.clone();
+        let (status, sessions) = self
+            .request_on(&profile_id, Method::GET, "api/sessions", None)
+            .await?;
         if status != 200 {
             return Err(disconnected());
         }
@@ -293,17 +451,29 @@ impl Jupyter {
             .iter()
             .find(|s| s["path"] == path)
         {
-            if session["kernel"]["name"] != self.config.kernel {
+            if session["kernel"]["name"] != kernelspec {
                 return Err(error(
                     ErrorCode::UnsupportedOperation,
                     "Existing notebook kernel differs from startup configuration",
                 ));
             }
+            if let Some(id) = session["kernel"]["id"].as_str() {
+                self.kernel_profiles
+                    .write()
+                    .unwrap()
+                    .insert(id.into(), profile_id);
+            }
             return Ok(session.clone());
         }
-        let (status, session) = self.request(Method::POST, "api/sessions", Some(json!({"path":path,"name":path.rsplit('/').next(),"type":"notebook","kernel":{"name":self.config.kernel}}))).await?;
+        let (status, session) = self.request_on(&profile_id, Method::POST, "api/sessions", Some(json!({"path":path,"name":path.rsplit('/').next(),"type":"notebook","kernel":{"name":kernelspec}}))).await?;
         if status != 201 {
             return Err(error(ErrorCode::TransportError, "Kernel could not start"));
+        }
+        if let Some(id) = session["kernel"]["id"].as_str() {
+            self.kernel_profiles
+                .write()
+                .unwrap()
+                .insert(id.into(), profile_id);
         }
         Ok(session)
     }
@@ -311,7 +481,8 @@ impl Jupyter {
         let session = self.ensure_kernel(path).await?;
         let id = session["kernel"]["id"].as_str().ok_or_else(malformed)?;
         let status = self
-            .request(
+            .request_on(
+                &self.profile_for_path(path),
                 Method::POST,
                 &format!("api/kernels/{id}/{action}"),
                 Some(json!({})),
@@ -324,8 +495,10 @@ impl Jupyter {
         Ok(())
     }
     pub async fn rename(&self, old: &str, new: &str) -> Result<()> {
+        let profile = self.profile_for_path(old);
         let status = self
-            .request(
+            .request_on(
+                &profile,
                 Method::PATCH,
                 &format!("api/contents/{old}"),
                 Some(json!({"path":new})),
@@ -338,14 +511,17 @@ impl Jupyter {
                 "Notebook could not be renamed",
             ));
         }
-        let (_, sessions) = self.request(Method::GET, "api/sessions", None).await?;
+        let (_, sessions) = self
+            .request_on(&profile, Method::GET, "api/sessions", None)
+            .await?;
         if let Some(session) = sessions
             .as_array()
             .and_then(|s| s.iter().find(|s| s["path"] == old))
         {
             let id = session["id"].as_str().ok_or_else(malformed)?;
             if self
-                .request(
+                .request_on(
+                    &profile,
                     Method::PATCH,
                     &format!("api/sessions/{id}"),
                     Some(json!({"path":new})),
@@ -360,6 +536,10 @@ impl Jupyter {
                 ));
             }
         }
+        let mut bindings = self.bindings.write().unwrap();
+        if let Some(binding) = bindings.remove(old) {
+            bindings.insert(new.into(), binding);
+        }
         Ok(())
     }
     pub async fn socket(&self, path: &str) -> Result<Socket> {
@@ -368,12 +548,19 @@ impl Jupyter {
         self.socket_kernel(id).await
     }
     pub async fn socket_kernel(&self, id: &str) -> Result<Socket> {
-        let mut url = self
-            .config
+        let profile_id = self
+            .kernel_profiles
+            .read()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| self.config.default_profile.clone());
+        let profile = self.profile(&profile_id)?;
+        let mut url = profile
             .url
             .join(&format!("api/kernels/{id}/channels"))
             .map_err(|_| malformed())?;
-        url.set_scheme(if self.config.url.scheme() == "https" {
+        url.set_scheme(if profile.url.scheme() == "https" {
             "wss"
         } else {
             "ws"
@@ -568,6 +755,14 @@ mod tests {
             url: url::Url::parse("http://127.0.0.1:1/").unwrap(),
             token: String::new(),
             kernel: "python3".into(),
+            default_profile: "default".into(),
+            kernel_profiles: std::collections::BTreeMap::from([(
+                "default".into(),
+                super::super::config::KernelProfile {
+                    url: url::Url::parse("http://127.0.0.1:1/").unwrap(),
+                    kernelspec: "python3".into(),
+                },
+            )]),
             notebook: "test.ipynb".into(),
             workspace: "/tmp".into(),
             static_dir: None,
@@ -658,6 +853,36 @@ mod tests {
                 .unwrap_err()
                 .code,
             ErrorCode::BoundsExceeded
+        );
+    }
+    #[test]
+    fn notebook_bindings_select_profiles_and_kernelspecs() {
+        let mut adapter = adapter();
+        let config = Arc::get_mut(&mut adapter.config).unwrap();
+        config.kernel_profiles.insert(
+            "tlaplus".into(),
+            super::super::config::KernelProfile {
+                url: url::Url::parse("http://127.0.0.1:2/").unwrap(),
+                kernelspec: "tlaplus_jupyter".into(),
+            },
+        );
+        let adapter = Jupyter::new(adapter.config).unwrap();
+        assert_eq!(
+            adapter.resolve_profile("tlaplus_jupyter").unwrap(),
+            "tlaplus"
+        );
+        adapter
+            .bindings
+            .write()
+            .unwrap()
+            .insert("spec.ipynb".into(), "tlaplus".into());
+        let snapshot = adapter
+            .snapshot("spec.ipynb", &notebook(), 1, KernelState::Idle)
+            .unwrap();
+        assert_eq!(snapshot.kernel.name, "tlaplus_jupyter");
+        assert_eq!(
+            adapter.resolve_profile("missing").unwrap_err().code,
+            ErrorCode::UnsupportedOperation
         );
     }
 }

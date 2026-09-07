@@ -77,16 +77,15 @@ pub(super) async fn open(
         let step_id = step.id.clone();
         let step_title = step.title.clone();
         let snapshot =
-            microscope::playground_snapshot(&doc, input.step_index, &host.config.kernel)?;
+            microscope::playground_snapshot(&doc, input.step_index, &snapshot.kernel.name)?;
         let id = Uuid::new_v4().to_string();
         let directory = path
             .rsplit_once('/')
             .map(|(dir, _)| format!("{dir}/"))
             .unwrap_or_default();
-        let session = host
-            .jupyter
-            .ensure_kernel(&format!("{directory}playground-{id}.ipynb"))
-            .await?;
+        let playground_path = format!("{directory}playground-{id}.ipynb");
+        host.jupyter.inherit_profile(&playground_path, &path);
+        let session = host.jupyter.ensure_kernel(&playground_path).await?;
         let kernel_id = session["kernel"]["id"]
             .as_str()
             .ok_or_else(malformed)?
@@ -162,7 +161,8 @@ async fn dispose_expected(host: &Host, expected: Option<&str>) -> Result<()> {
         p.closing = true;
         let status = host
             .jupyter
-            .request(
+            .request_for_kernel(
+                &p.kernel_id,
                 reqwest::Method::DELETE,
                 &format!("api/sessions/{}", p.session_id),
                 None,
@@ -350,7 +350,7 @@ async fn run(
                 if result.completion.as_ref().is_some_and(|value| value.cursor_start > value.cursor_end || value.cursor_end > code.chars().count()) {return Err(malformed());}
                 return Ok(result);
             },
-            InterruptKernel=>{let (status, _)=host.jupyter.request(reqwest::Method::POST,&format!("api/kernels/{kernel_id}/interrupt"),Some(json!({}))).await?;if status!=204 {return Err(error(ErrorCode::TransportError,"Kernel interrupt failed"));}return Ok(empty_result(&c));},
+            InterruptKernel=>{let (status, _)=host.jupyter.request_for_kernel(&kernel_id,reqwest::Method::POST,&format!("api/kernels/{kernel_id}/interrupt"),Some(json!({}))).await?;if status!=204 {return Err(error(ErrorCode::TransportError,"Kernel interrupt failed"));}return Ok(empty_result(&c));},
             _=>return Err(error(ErrorCode::UnsupportedOperation,"Playgrounds support one code cell, execution and completion only"))
         }
         publish(&host,&id,&c,&snapshot,&None).await

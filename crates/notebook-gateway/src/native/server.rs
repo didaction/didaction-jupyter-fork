@@ -259,7 +259,7 @@ async fn ready(State(host): State<App>) -> Response {
     }
 }
 async fn configuration(State(host): State<App>) -> Response {
-    Json(json!({"path":host.config.path(&host.config.notebook,false).unwrap_or_default(),"kernel":host.config.kernel})).into_response()
+    Json(json!({"path":host.config.path(&host.config.notebook,false).unwrap_or_default(),"kernel":host.config.kernel,"default_kernel_profile":host.config.default_profile,"kernel_profiles":host.config.kernel_profiles.iter().map(|(id,p)| json!({"id":id,"kernelspec":p.kernelspec})).collect::<Vec<_>>()})).into_response()
 }
 async fn list(State(host): State<App>, Query(query): Query<HashMap<String, String>>) -> Response {
     match host
@@ -583,20 +583,9 @@ async fn dispatch(
         Err(e) => return failed(&command, e),
     };
     if let NotebookCommandKind::Setup {
-        path: requested,
-        kernel,
-        ..
+        path: requested, ..
     } = &command.kind
     {
-        if kernel.as_ref().is_some_and(|k| k != &host.config.kernel) {
-            return failed(
-                &command,
-                error(
-                    ErrorCode::UnsupportedOperation,
-                    "Kernel is fixed at startup",
-                ),
-            );
-        }
         let requested = match host.config.path(requested, false) {
             Ok(p) => p,
             Err(e) => return failed(&command, e),
@@ -911,7 +900,9 @@ async fn run(
             }
             raw
         }
-        Setup { create, .. } => host.jupyter.setup(path, *create).await?,
+        Setup { create, kernel, .. } => {
+            host.jupyter.setup(path, *create, kernel.as_deref()).await?
+        }
         Query { .. } | Reconnect => {
             host.jupyter.ensure_kernel(path).await?;
             host.jupyter.read(path).await?
@@ -994,7 +985,8 @@ async fn run(
         CreateCheckpoint => {
             if host
                 .jupyter
-                .request(
+                .request_for_path(
+                    path,
                     reqwest::Method::POST,
                     &format!("api/contents/{path}/checkpoints"),
                     None,

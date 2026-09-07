@@ -64,8 +64,10 @@ warning when Stop must terminate a worker and discard its live variables.
   Trusted human-authored cells may use the pinned kernel `pip`; never expose that
   capability as a WebMCP or generic gateway operation.
 - Jupyter, gateway, and frontend bind to loopback in non-container startup.
-- Workspace root and kernelspec are immutable startup settings. The startup
-  notebook is a default; each tab selects a confined relative notebook path.
+- Workspace root and enabled server profiles are immutable startup settings.
+  Each notebook selects one enabled profile through standard
+  `metadata.kernelspec.name`; new notebooks use the configured default profile.
+  The startup notebook is a default; each tab selects a confined relative notebook path.
   Scope commands, downloads, streams and idempotency caches to that identity.
   Jupyter's configured Contents manager also rejects symlinks outside its root.
 - `jupyter-server`, `jupyter-kernel-client`, `ipykernel`, `nbformat`, and `pip` stay

@@ -99,10 +99,6 @@ pub fn save(settings: &Settings) -> io::Result<PathBuf> {
     fs::create_dir_all(&directory)?;
     let encoded = toml::to_string_pretty(settings).map_err(io::Error::other)?;
     fs::write(directory.join("config.toml"), encoded)?;
-    fs::write(
-        directory.join("kernel-profiles.json"),
-        serde_json::to_vec_pretty(settings).map_err(io::Error::other)?,
-    )?;
     Ok(directory)
 }
 

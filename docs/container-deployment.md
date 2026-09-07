@@ -52,6 +52,20 @@ The gateway's readiness check probes Jupyter status, installed kernelspecs, and
 Contents. A missing configured kernelspec is not reported ready. Actual kernel
 launch is checked by the integration test, not repeatedly by health probes.
 
+### Multiple server kernels with `djupctl`
+
+`djupctl config` enables one or more server profiles and chooses the default.
+`djupctl up` starts one isolated Jupyter container per enabled server profile,
+mounts the same configured notebook workspace into each, and gives the gateway
+a private, versioned routing manifest. Browser code never receives backend URLs
+or the shared Jupyter credential.
+
+Existing notebooks route by the conventional `metadata.kernelspec.name` field.
+New notebooks record the default profile's kernelspec. A setup command may name
+either a profile ID or an unambiguous kernelspec; an unavailable or ambiguous
+kernelspec fails explicitly. The choice is therefore durable across gateway
+restarts, while live kernel sessions remain isolated in their profile container.
+
 ## Other images / kernels
 
 ### Quantum-school demo

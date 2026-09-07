@@ -1,12 +1,36 @@
 use super::{Result, error};
 use notebook_protocol::ErrorCode;
-use std::{collections::HashSet, env, path::PathBuf, time::Duration};
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, HashSet},
+    env,
+    path::PathBuf,
+    time::Duration,
+};
 use url::Url;
 
+#[derive(Clone, Debug)]
+pub struct KernelProfile {
+    pub url: Url,
+    pub kernelspec: String,
+}
+#[derive(Deserialize)]
+struct KernelProfilesFile {
+    schema_version: u32,
+    default_profile: String,
+    profiles: BTreeMap<String, RawKernelProfile>,
+}
+#[derive(Deserialize)]
+struct RawKernelProfile {
+    url: String,
+    kernelspec: String,
+}
 pub struct Config {
     pub url: Url,
     pub token: String,
     pub kernel: String,
+    pub default_profile: String,
+    pub kernel_profiles: BTreeMap<String, KernelProfile>,
     pub notebook: String,
     pub workspace: PathBuf,
     pub static_dir: Option<PathBuf>,
@@ -61,10 +85,28 @@ impl Config {
         {
             return Err(invalid());
         }
+        let kernel = value("KERNEL_NAME", "python3");
+        let (default_profile, kernel_profiles) = match env::var("DIDACTION_KERNEL_PROFILES_FILE") {
+            Ok(path) => parse_profiles(&std::fs::read(path).map_err(|_| invalid())?)?,
+            Err(_) => {
+                let default_profile = "default".to_string();
+                let profiles = BTreeMap::from([(
+                    default_profile.clone(),
+                    KernelProfile {
+                        url: url.clone(),
+                        kernelspec: kernel.clone(),
+                    },
+                )]);
+                (default_profile, profiles)
+            }
+        };
+        let default = kernel_profiles.get(&default_profile).ok_or_else(invalid)?;
         let config = Self {
-            url,
+            url: default.url.clone(),
             token,
-            kernel: value("KERNEL_NAME", "python3"),
+            kernel: default.kernelspec.clone(),
+            default_profile,
+            kernel_profiles,
             notebook: value("NOTEBOOK_PATH", "notebook-parity-demo.ipynb"),
             workspace: value("WORKSPACE", ".runtime/notebooks").into(),
             static_dir: env::var("DIDACTION_STATIC_DIR").ok().map(Into::into),
@@ -114,6 +156,49 @@ impl Config {
             format!("{raw}.ipynb")
         })
     }
+}
+fn parse_profiles(raw: &[u8]) -> Result<(String, BTreeMap<String, KernelProfile>)> {
+    let file: KernelProfilesFile = serde_json::from_slice(raw).map_err(|_| invalid())?;
+    if file.schema_version != 1
+        || file.profiles.is_empty()
+        || !file.profiles.contains_key(&file.default_profile)
+    {
+        return Err(invalid());
+    }
+    let profiles = file
+        .profiles
+        .into_iter()
+        .map(|(id, raw)| {
+            let mut url = Url::parse(&raw.url).map_err(|_| invalid())?;
+            url.set_path(&format!("{}/", url.path().trim_end_matches('/')));
+            let profile = KernelProfile {
+                url,
+                kernelspec: raw.kernelspec,
+            };
+            validate_profile(&id, &profile)?;
+            Ok((id, profile))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    Ok((file.default_profile, profiles))
+}
+fn validate_profile(id: &str, profile: &KernelProfile) -> Result<()> {
+    if id.is_empty()
+        || id.len() > 64
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        || profile.kernelspec.is_empty()
+        || profile.kernelspec.len() > 128
+        || !matches!(profile.url.scheme(), "http" | "https")
+        || profile.url.host_str().is_none()
+        || !profile.url.username().is_empty()
+        || profile.url.password().is_some()
+        || profile.url.query().is_some()
+        || profile.url.fragment().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(())
 }
 fn normalize_origin(raw: &str) -> Result<String> {
     let url = Url::parse(raw).map_err(|_| invalid())?;
@@ -180,6 +265,18 @@ mod tests {
             "https://u:p@example.com",
         ] {
             assert!(parse_origins(invalid).is_err(), "{invalid}");
+        }
+    }
+    #[test]
+    fn profile_file_is_versioned_bounded_and_normalizes_urls() {
+        let (default, profiles) = parse_profiles(br#"{"schema_version":1,"default_profile":"verus","profiles":{"verus":{"url":"http://jupyter-verus:8888","kernelspec":"verus"},"tlaplus":{"url":"http://jupyter-tlaplus:8888","kernelspec":"tlaplus_jupyter"}}}"#).unwrap();
+        assert_eq!(default, "verus");
+        assert_eq!(
+            profiles["tlaplus"].url.as_str(),
+            "http://jupyter-tlaplus:8888/"
+        );
+        for invalid in [br#"{"schema_version":2,"default_profile":"x","profiles":{}}"#.as_slice(), br#"{"schema_version":1,"default_profile":"missing","profiles":{"x":{"url":"file:///tmp/x","kernelspec":"x"}}}"#.as_slice()] {
+            assert!(parse_profiles(invalid).is_err());
         }
     }
 }
