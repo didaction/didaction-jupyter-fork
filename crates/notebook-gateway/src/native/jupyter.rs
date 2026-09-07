@@ -270,15 +270,17 @@ impl Jupyter {
         } else if status != 200 {
             return Err(error(ErrorCode::InvalidInput, "Notebook does not exist"));
         } else {
-            let (_, raw) = self
+            let (_, mut raw) = self
                 .request(
                     Method::GET,
                     &format!("api/contents/{path}?content=1&type=notebook"),
                     None,
                 )
                 .await?;
-            let name = raw["content"]["metadata"]["kernelspec"]["name"].as_str();
-            let selected = if let Some(name) = name {
+            let name = raw["content"]["metadata"]["kernelspec"]["name"]
+                .as_str()
+                .map(str::to_owned);
+            let selected = if let Some(name) = name.as_deref() {
                 self.config
                     .kernel_profiles
                     .iter()
@@ -303,6 +305,12 @@ impl Jupyter {
                 .write()
                 .unwrap()
                 .insert(path.into(), selected.into());
+            if name.is_none() {
+                let kernelspec = self.profile(selected)?.kernelspec.clone();
+                raw["content"]["metadata"]["kernelspec"] =
+                    json!({"name":kernelspec,"display_name":kernelspec});
+                self.save(path, &raw["content"]).await?;
+            }
         }
         self.ensure_kernel(path).await?;
         self.read(path).await
