@@ -92,6 +92,10 @@ fn writes(kind: &NotebookCommandKind) -> bool {
             | NotebookCommandKind::Setup { create: false, .. }
     )
 }
+
+fn blocked_by_uncertain_execution(kind: &NotebookCommandKind) -> bool {
+    matches!(kind, NotebookCommandKind::ExecuteCell { .. })
+}
 fn empty_result(command: &NotebookCommand) -> CommandResult {
     CommandResult {
         microscope: None,
@@ -637,16 +641,10 @@ async fn dispatch(
                 )
             });
         }
-        if write
-            && authority.uncertain.contains(&path)
-            && !matches!(
-                command.kind,
-                NotebookCommandKind::RestartKernel | NotebookCommandKind::InterruptKernel
-            )
-        {
+        if authority.uncertain.contains(&path) && blocked_by_uncertain_execution(&command.kind) {
             return Err(error(
                 ErrorCode::ExecutionRejected,
-                "Execution outcome is uncertain; restart the kernel before new mutations",
+                "Execution outcome is uncertain; restart the kernel before executing again",
             ));
         }
         if authority.collaboration.room(&path)?.active > 0
@@ -1173,4 +1171,29 @@ async fn emit(
         let _ = sender.try_send(format!("{encoded}\n"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::blocked_by_uncertain_execution;
+    use notebook_protocol::{CellMutation, NotebookCommandKind};
+
+    #[test]
+    fn uncertain_execution_blocks_execution_but_not_notebook_edits() {
+        assert!(blocked_by_uncertain_execution(
+            &NotebookCommandKind::ExecuteCell {
+                cell_id: "cell-1".into(),
+            }
+        ));
+        assert!(!blocked_by_uncertain_execution(
+            &NotebookCommandKind::ModifyCells {
+                changes: vec![CellMutation::Delete {
+                    cell_id: "cell-1".into(),
+                }],
+            }
+        ));
+        assert!(!blocked_by_uncertain_execution(
+            &NotebookCommandKind::RestartKernel
+        ));
+    }
 }
