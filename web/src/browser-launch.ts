@@ -5,10 +5,18 @@ import {
   rememberWorkspace,
 } from "./browser-workspace-catalog";
 import {
-  BROWSER_KERNELS,
   DEFAULT_BROWSER_KERNEL,
   isBrowserKernelName,
+  storedBrowserKernel,
 } from "./browser-kernel-profile";
+
+function notebookKernel(snapshot: unknown): unknown {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const kernel = (snapshot as { kernel?: unknown }).kernel;
+  return kernel && typeof kernel === "object"
+    ? (kernel as { name?: unknown }).name
+    : null;
+}
 
 export async function chooseBrowserWorkspace(
   workspace: BrowserWorkspace,
@@ -17,12 +25,19 @@ export async function chooseBrowserWorkspace(
 ): Promise<{ path: string; kernel: string; workspace: string }> {
   let workspaceId =
     new URL(location.href).searchParams.get("workspace") ?? "legacy";
-  const directKernel = requestedKernel ?? DEFAULT_BROWSER_KERNEL;
+  const savedNotebook = requested
+    ? await workspace.store.read(requested)
+    : undefined;
+  const directKernel =
+    storedBrowserKernel(notebookKernel(savedNotebook)) ??
+    (requestedKernel && isBrowserKernelName(requestedKernel)
+      ? requestedKernel
+      : DEFAULT_BROWSER_KERNEL);
   if (!isBrowserKernelName(directKernel))
     throw new Error(
       "Unsupported browser kernel. Open / and choose a versioned Python runtime.",
     );
-  if (requested && (await workspace.store.read(requested)))
+  if (requested && savedNotebook)
     return { path: requested, kernel: directKernel, workspace: workspaceId };
   const panel = document.querySelector<HTMLElement>("#browser-launch")!;
   const layout = document.querySelector<HTMLElement>(".workspace-layout")!;
@@ -34,23 +49,6 @@ export async function chooseBrowserWorkspace(
   const resume = document.querySelector<HTMLButtonElement>("#browser-resume")!;
   const file = document.querySelector<HTMLInputElement>("#browser-zip")!;
   const picker = document.querySelector<HTMLSelectElement>("#browser-saved")!;
-  const kernel = document.querySelector<HTMLSelectElement>("#browser-kernel")!;
-  // Experimental runtime is offered only when its separately prepared bundle exists.
-  const xeusAvailable = await fetch(
-    `${import.meta.env.BASE_URL}xeus/didaction-xeus/xpython/kernel.json`,
-  )
-    .then(
-      async (response) =>
-        response.ok && (await response.json()).language === "python",
-    )
-    .catch(() => false);
-  if (xeusAvailable) {
-    kernel.add(
-      new Option(BROWSER_KERNELS["xeus-python-019"].label, "xeus-python-019"),
-    );
-  }
-  if (directKernel === "xeus-python-019" && xeusAvailable)
-    kernel.value = directKernel;
   const saved = (await savedWorkspaces()).filter((w) => w.notebooks.length);
   for (const entry of saved) {
     const option = document.createElement("option");
@@ -84,10 +82,10 @@ export async function chooseBrowserWorkspace(
       empty.disabled = demo.disabled = resume.disabled = file.disabled = true;
       message.textContent = "Preparing browser workspace…";
       try {
-        if (!isBrowserKernelName(kernel.value))
-          throw new Error("Select a supported browser kernel.");
-        const selectedKernel = kernel.value;
         const path = await action();
+        const stored = await workspace.store.read(path);
+        const selectedKernel =
+          storedBrowserKernel(notebookKernel(stored)) ?? directKernel;
         panel.hidden = true;
         layout.hidden = false;
         resolve({ path, kernel: selectedKernel, workspace: workspaceId });

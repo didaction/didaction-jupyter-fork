@@ -70,6 +70,7 @@ test("notebook export uses nbformat and preserves metadata, sources and output",
   } as BrowserSnapshot;
   const raw = JSON.parse(new TextDecoder().decode(notebookBytes(snapshot)));
   expect(raw.nbformat).toBe(4);
+  expect(raw.metadata.kernelspec.name).toBe("pyodide-314");
   expect(raw.cells[0].metadata).toEqual(snapshot.cells[0]!.metadata);
   expect(raw.cells[0].outputs[0].data["text/plain"]).toBe("42");
   expect(raw.cells[1]).not.toHaveProperty("outputs");

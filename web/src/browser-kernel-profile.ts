@@ -18,3 +18,7 @@ export const DEFAULT_BROWSER_KERNEL: BrowserKernelName = "pyodide-314";
 export function isBrowserKernelName(value: string): value is BrowserKernelName {
   return value in BROWSER_KERNELS;
 }
+
+export function storedBrowserKernel(value: unknown): BrowserKernelName | null {
+  return typeof value === "string" && isBrowserKernelName(value) ? value : null;
+}

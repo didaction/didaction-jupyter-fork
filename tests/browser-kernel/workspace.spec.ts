@@ -71,29 +71,15 @@ test("browser notebook lease reports a live owner and recovers after release", a
   );
 });
 
-test("optional xeus assets may be absent without breaking Pyodide startup", async ({
+test("landing page does not ask for a kernel before a notebook is selected", async ({
   page,
 }) => {
-  await page.route("**/xeus/didaction-xeus/xpython/kernel.json", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "text/html",
-      body: "<!doctype html><html></html>",
-    }),
-  );
   await page.goto("/");
   await expect(
     page.getByRole("button", { name: "Open demo workspace" }),
   ).toBeVisible();
-  await expect(
-    page.locator('#browser-kernel option[value="pyodide-314"]'),
-  ).toHaveText("Pyodide 314.0.5 · Python 3.14");
-  await expect(
-    page.locator('#browser-kernel option[value="pyodide-027"]'),
-  ).toHaveText("Pyodide 0.27.7 · Python 3.12");
-  await expect(
-    page.locator('#browser-kernel option[value="xeus-python-019"]'),
-  ).toHaveCount(0);
+  await expect(page.locator("#browser-kernel")).toHaveCount(0);
+  await expect(page.locator(".browser-kernel-choice")).toHaveCount(0);
 });
 import { zipFixture } from "../fixtures/workspace-zip";
 
@@ -148,27 +134,12 @@ test("ZIP startup persists notebooks and files, mounts real Python workspace, re
 }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Choose a workspace and kernel" }),
+    page.getByRole("heading", { name: "Choose a workspace" }),
   ).toBeVisible();
-  await expect(page.getByLabel("Python runtime", { exact: true })).toHaveValue(
-    "pyodide-314",
-  );
   const workspaceChoice = page.locator(".browser-workspace-choice");
-  const kernelChoice = page.locator(".browser-kernel-choice");
   await expect(workspaceChoice).toContainText("Notebook workspace");
-  await expect(kernelChoice).toContainText(
-    "This choice is separate from the notebook workspace.",
-  );
-  const [workspaceBox, kernelBox] = await Promise.all([
-    workspaceChoice.boundingBox(),
-    kernelChoice.boundingBox(),
-  ]);
+  const workspaceBox = await workspaceChoice.boundingBox();
   expect(workspaceBox).not.toBeNull();
-  expect(kernelBox).not.toBeNull();
-  expect(workspaceBox!.x).toBeLessThan(kernelBox!.x);
-  await expect(
-    page.locator('#browser-kernel option[value="pyodide-314"]'),
-  ).toHaveCount(1);
   for (const width of [1280, 739]) {
     await page.setViewportSize({ width, height: 900 });
     await page.screenshot({ path: `.runtime/browser-launch-${width}.png` });

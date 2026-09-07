@@ -1,10 +1,18 @@
 import type { BrowserSnapshot } from "./browser-transport";
+import {
+  BROWSER_KERNELS,
+  DEFAULT_BROWSER_KERNEL,
+} from "./browser-kernel-profile";
 import type { WorkspaceEntry } from "./workspace-zip";
 import { browserPath } from "./browser-store";
 import { crc32, COUNT_LIMIT, ENTRY_LIMIT, ZIP_LIMIT } from "./workspace-zip";
 
 /** Standard nbformat, not the runtime snapshot envelope. */
 export function notebookBytes(snapshot: BrowserSnapshot): Uint8Array {
+  const kernel = snapshot.kernel ?? {
+    name: DEFAULT_BROWSER_KERNEL,
+    display_name: BROWSER_KERNELS[DEFAULT_BROWSER_KERNEL].displayName,
+  };
   const cells = snapshot.cells.map((cell) => {
     const base = {
       id: cell.id,
@@ -48,7 +56,18 @@ export function notebookBytes(snapshot: BrowserSnapshot): Uint8Array {
     };
   });
   return new TextEncoder().encode(
-    JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells }),
+    JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {
+        kernelspec: {
+          name: kernel.name,
+          display_name: kernel.display_name,
+          language: "python",
+        },
+      },
+      cells,
+    }),
   );
 }
 

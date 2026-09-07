@@ -112,8 +112,7 @@ test("real xeus worker through egui and WebMCP: execute, plot and persist", asyn
       forbidden.push(url.href);
   });
   await installMicroscopeTools(page);
-  await page.goto("/");
-  await page.locator("#browser-kernel").selectOption("xeus-python-019");
+  await page.goto("/?kernel=xeus-python-019");
   await page.getByRole("button", { name: "Open demo workspace" }).click();
   await expect(page.locator("#notebook-canvas")).toBeVisible();
   await expect(page.locator("#connection-status")).toContainText(

@@ -79,6 +79,8 @@ warning when Stop must terminate a worker and discard its live variables.
 - Full verification: `scripts/check.sh`
 - Real acceptance: `scripts/smoke.sh`
 - Docker: `bash scripts/container.sh up`
+- Kernel deployment CLI: `cargo install --path crates/didaction-jupyter-cli`, then
+  `djupctl init`, `djupctl config`, and `djupctl up`
 - Container acceptance: `bash scripts/container-check.sh` after building the gateway image.
 
 For runtime images, connection settings, workspace mounts, or secrets changes,

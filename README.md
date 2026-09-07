@@ -81,6 +81,21 @@ Docker is also available:
 bash scripts/container.sh up
 ```
 
+For a persistent per-user kernel catalog and generated Compose deployment, install
+the Rust control utility and initialize it once:
+
+```bash
+cargo install --path crates/didaction-jupyter-cli
+djupctl init
+djupctl config
+djupctl up
+```
+
+`djupctl` stores configuration, a generated Compose file, and its private
+development token under `~/.config/didaction`. The TUI distinguishes server
+container profiles from browser-WASM profiles; only an enabled server profile can
+be selected for a Compose deployment.
+
 Only <http://127.0.0.1:5173> is published; Jupyter remains on the private container
 network. See [Container deployment](docs/container-deployment.md) for custom images,
 attach mode, workspaces, and secrets.

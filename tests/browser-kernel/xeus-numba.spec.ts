@@ -31,8 +31,7 @@ test("real xeus Numba compiles numerical code and displays its output", async ({
   }
   await page.setViewportSize({ width: 1280, height: 1000 });
   await installMicroscopeTools(page);
-  await page.goto("/");
-  await page.locator("#browser-kernel").selectOption("xeus-python-019");
+  await page.goto("/?kernel=xeus-python-019");
   await page.getByRole("button", { name: "Open demo workspace" }).click();
   await expect(page.locator("#connection-status")).toContainText(
     "WebMCP ready",

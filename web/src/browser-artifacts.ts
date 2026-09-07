@@ -10,6 +10,11 @@ import {
   readWorkspaceZip,
   type WorkspaceEntry,
 } from "./workspace-zip";
+import {
+  DEFAULT_BROWSER_KERNEL,
+  isBrowserKernelName,
+  type BrowserKernelName,
+} from "./browser-kernel-profile";
 
 const DEMO_ARCHIVES = [
   "demos/didaction-runtime-tour.zip",
@@ -17,6 +22,18 @@ const DEMO_ARCHIVES = [
 ] as const;
 
 export const DEFAULT_DEMO_NOTEBOOK = "didaction-runtime-tour.ipynb";
+
+export function kernelFromNotebookMetadata(
+  metadata: Record<string, unknown>,
+): BrowserKernelName {
+  const kernelspec = metadata.kernelspec;
+  if (!kernelspec || typeof kernelspec !== "object")
+    return DEFAULT_BROWSER_KERNEL;
+  const name = (kernelspec as { name?: unknown }).name;
+  return typeof name === "string" && isBrowserKernelName(name)
+    ? name
+    : DEFAULT_BROWSER_KERNEL;
+}
 
 export function importNotebook(path: string, bytes: Uint8Array) {
   const raw = JSON.parse(
@@ -30,7 +47,10 @@ export function importNotebook(path: string, bytes: Uint8Array) {
     Array.isArray(raw.metadata)
   )
     throw new Error("Expected an nbformat 4 notebook.");
-  const snapshot = initialBrowserSnapshot(path);
+  const snapshot = initialBrowserSnapshot(
+    path,
+    kernelFromNotebookMetadata(raw.metadata as Record<string, unknown>),
+  );
   snapshot.cells = raw.cells.map((cell: Record<string, unknown>) => {
     if (
       Array.isArray(cell.source) &&
