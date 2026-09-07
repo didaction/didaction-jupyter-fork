@@ -1,6 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { artifactPath, uploadRequest } from "./artifacts";
+import { artifactPath, uploadRequest, uploadRequests } from "./artifacts";
+import { zipFixture } from "../../tests/fixtures/workspace-zip";
 
 test("artifact names stay in their displayed folder", () => {
   assert.equal(
@@ -32,5 +33,27 @@ test("uploads preserve binary bytes and classify notebooks", async () => {
   );
   await assert.rejects(
     uploadRequest("", new File([new Uint8Array(1_000_001)], "big.bin")),
+  );
+});
+test("ZIP uploads create implied folders before bounded files", async () => {
+  const zip = zipFixture([
+    {
+      name: "course/lesson.ipynb",
+      text: '{"nbformat":4,"nbformat_minor":5,"metadata":{},"cells":[]}',
+    },
+    { name: "course/data.csv", text: "x,y\n1,2" },
+    { name: "course/.DS_Store", text: "ignored" },
+  ]);
+  const requests = await uploadRequests(
+    "imports",
+    new File([zip], "course.zip", { type: "application/zip" }),
+  );
+  assert.deepEqual(
+    requests.map(({ path, kind }) => ({ path, kind })),
+    [
+      { path: "imports/course", kind: "directory" },
+      { path: "imports/course/lesson.ipynb", kind: "notebook" },
+      { path: "imports/course/data.csv", kind: "file" },
+    ],
   );
 });

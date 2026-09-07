@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { zipFixture } from "../fixtures/workspace-zip";
 
 test("driver creates nested workspace items and uploads a notebook without overwriting", async ({
   page,
@@ -50,6 +51,30 @@ test("driver creates nested workspace items and uploads a notebook without overw
   await expect(
     page.getByRole("button", { name: "data.csv", exact: true }),
   ).toBeVisible();
+  await page.locator("#folder-up").click();
+  await page.locator("#artifact-upload").setInputFiles({
+    name: "import.zip",
+    mimeType: "application/zip",
+    buffer: zipFixture([
+      { name: "zip-course/", text: "" },
+      {
+        name: "zip-course/imported.ipynb",
+        text: JSON.stringify({
+          nbformat: 4,
+          nbformat_minor: 5,
+          metadata: {},
+          cells: [],
+        }),
+      },
+      { name: "zip-course/.DS_Store", text: "ignored" },
+    ]),
+  });
+  await page.getByRole("button", { name: "zip-course", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "imported.ipynb", exact: true }),
+  ).toBeVisible();
+  await page.locator("#folder-up").click();
+  await page.getByRole("button", { name: "nested", exact: true }).click();
   await create("file", "data.csv");
   await expect(page.locator("#explorer-status")).toContainText(
     "already exists",

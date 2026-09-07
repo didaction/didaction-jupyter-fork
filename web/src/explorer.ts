@@ -1,7 +1,7 @@
 /** Accessible workspace navigation; notebook editing remains in egui/WASM. */
 import {
   artifactPath,
-  uploadRequest,
+  uploadRequests,
   type ArtifactTransport,
 } from "./artifacts";
 import { downloadWorkspace, writeWorkspaceZip } from "./workspace-export";
@@ -205,7 +205,7 @@ export function installExplorer(
       ? "Workspace uploads require the native server runtime"
       : !canWrite()
         ? "Only the workspace driver can create or upload files"
-        : "Create or upload in the displayed folder (1 MB per file)";
+        : "Create or upload in the displayed folder (1 MB per file; 20 MB per ZIP)";
   };
   const observer = new MutationObserver(updateAccess);
   observer.observe(document.querySelector("#driver-status")!, {
@@ -259,7 +259,8 @@ export function installExplorer(
     const destination = directory;
     void write(async () => {
       for (const file of files)
-        await artifacts!.create(await uploadRequest(destination, file));
+        for (const request of await uploadRequests(destination, file))
+          await artifacts!.create(request);
     }).finally(() => {
       upload.value = "";
     });
